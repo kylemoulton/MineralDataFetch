@@ -1,0 +1,21 @@
+{
+  "name": "mineraldatafetch",
+  "version": "1.0.0",
+  "description": "mineraldatafetch is a Node.js application for fetching mineral data from the InfoBox on each of the mineral's Wikipedia's page",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "mineral",
+    "wikipedia",
+    "mineral",
+    "identification"
+  ],
+  "author": "Kyle Moulton",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^0.18.0",
+    "mongoose": "^5.3.14"
+  }
+}
