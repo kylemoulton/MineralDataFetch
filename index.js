@@ -1,18 +1,21 @@
 const   axios =     require('axios'),
-        mongoose =  require('mongoose'),
+        // mongoose =  require('mongoose'),
         fs =        require('fs');
 // mongoose.connect('mongodb://localhost:27017/mineraldat');
 
 async function fetchMineralNames() {
-    let charsToFetch = 1;
+    let charsToFetch = 26;
     let mineralNames = [];
+    let currentGroupIndex = 0;
+    let currentNameIndex = 0;
     for (let i = 0; i < charsToFetch; i++) {
         const response = await axios.get(`https://en.wikipedia.org/w/api.php?action=parse&page=List%20of%20minerals&section=${i + 1}&prop=links&format=json`);
-        let currentGroupIndex = 0;
-        let currentNameIndex = 0;
         for (let j = 0; j < response.data.parse.links.length; j++) {
             if (response.data.parse.links[j]['*'].toLowerCase().charAt(0) === String.fromCharCode(97 + i)) {
-
+                if (response.data.parse.links[j]['*'] === 'Kaňkite' || response.data.parse.links[j]['*'] === 'Felsőbányaite' || response.data.parse.links[j]['*'] === 'Joaquinite-(Ce)') {
+                    console.log("Skipping unparsable mineral");
+                    continue;
+                }
                 if (currentNameIndex % 50 === 0) {
                     if (currentNameIndex !== 0) {
                         currentGroupIndex++;
@@ -30,7 +33,6 @@ async function fetchMineralNames() {
 }
 
 async function fetchMineralData(mineralNames, redirectIteration = 0) {
-    console.log(mineralNames[0]);
     var redirects = [];
     var hashRedirects = [];
     let failedMinerals = [];
@@ -68,10 +70,10 @@ async function fetchMineralData(mineralNames, redirectIteration = 0) {
                     let mineralName = queryData.title;
                     let rawData = queryData.revisions[0]['*'];
                     console.log(`${mineralName} parsing begin`);
+                    
                     if (rawData.includes(`\n'''`)) {
                         rawData = rawData.substring(0, rawData.indexOf(`\n'''`));
                     }
-                    rawData = rawData.replace(/(<ref[^>|\/]*>.*?<\/ref>)|<ref[^>]*\/>|'''/gm, '');
 
                     let splitData = rawData.split(/\s\|\s/);
                     
@@ -79,7 +81,7 @@ async function fetchMineralData(mineralNames, redirectIteration = 0) {
                         fetchedData = fetchedData.trim();
                         if (fetchedData.search(/\s\=\s/) !== -1) {
                             let splitKeyVals = fetchedData.split(/\s\=\s/);
-                            tempMineralData[splitKeyVals[0].trim()] = splitKeyVals[1].replace(/\r?\n|\r/, '').trim();
+                            tempMineralData[splitKeyVals[0].trim()] = splitKeyVals[1].trim();
                         }
                     });
 
@@ -107,6 +109,7 @@ async function fetchMineralData(mineralNames, redirectIteration = 0) {
         failedMinerals = [...failedMinerals, ...redirectData.failedMinerals];
     }
 
+    console.log(`Mineral Data fetching complete`);
     return {
         mineralData: mineralData, 
         failedMinerals: failedMinerals
@@ -114,7 +117,7 @@ async function fetchMineralData(mineralNames, redirectIteration = 0) {
 }
 
 async function writeMineralProperties(mineralData) {
-    let mineralAttributes = ["name", "class", "category", "color", "habit", "twinning", "cleavage", "fracture", "tenacity", "mohs", "luster", "streak", "diaphaneity", "gravity", "refractive", "birefringence", "pleochroism", "dispersion", "solubility", "fluorescence", "twoV", "formula", "molweight", "strunz", "dana", "crystalSystem", "unitCell", "symmetry", "opticalprop", "image"];
+    let mineralAttributes = ["name", "class", "HMSymbol", "category", "color", "habit", "twinning", "cleavage", "fracture", "tenacity", "mohs", "mohsLow", "mohsHigh", "luster", "streak", "diaphaneity", "gravity", "gravityLow", "gravityHigh", "refractive", "birefringence", "pleochroism", "dispersion", "solubility", "fluorescence", "twoV", "formula", "molweight", "strunz", "dana", "crystalSystem", "unitCell", "symmetry", "opticalprop", "image"];
     let stream = fs.createWriteStream('minerals.csv');
     await stream.once('open', function(fd) {
         for (let i = 0; i < mineralAttributes.length; i++) {
@@ -150,26 +153,116 @@ async function writeMineralProperties(mineralData) {
                 }
             }
             if (mineralData[minNames[i]]["class"]) {
-                let classValue = mineralData[minNames[i]]["class"].replace(/<small>|<\/small>/, '');
-                if (classValue.includes("[[H-M symbol]]")) {
-                    
-                    // [[H-M symbol]]: (overline|#)
-                    // [[H-M symbol]]: (?) (?)* (?)* (overline|#)*
-                    // (same [[H-M symol]])
-                    // overline|# = #\u0305
-                    mineralData[minNames[i]]["class"] = mineralData[minNames[i]]["class"].replace(/\[\[|\}\}|<small>|<\/small>/gm, '');
+                mineralData[minNames[i]]["class"] = mineralData[minNames[i]]["class"].replace(/\{\{|\}\}|<small>|<\/small>|<br\s*\/>/gm, '').trim()
+                mineralData[minNames[i]]["class"] = mineralData[minNames[i]]["class"].replace('–', '-');
+                mineralData[minNames[i]]["class"] = mineralData[minNames[i]]["class"].replace("[[H-M Symbol]]", "[[H-M symbol]]");
+                if (mineralData[minNames[i]]["class"].includes("[[H-M symbol]]")) {
+                    if (mineralData[minNames[i]]["class"].match(/\(.*/) !== null) {
+                        let classData = mineralData[minNames[i]]["class"].match(/\(.*/)[0];
+                        if (classData.includes("(same [[H-M symbol]])")) {
+                            classData = classData.split("(same [[H-M symbol]])");
+                            mineralData[minNames[i]]["class"] = mineralData[minNames[i]]["class"].substring(0, mineralData[minNames[i]]["class"].indexOf("(same [[H-M symbol]])")).trim();
+                            mineralData[minNames[i]]["HMSymbol"] = classData[0].match(/(.*)/)[0];
+                        } else if (classData.includes("[[H-M symbol]]:")) {
+                            classData = classData.split("[[H-M symbol]]:");
+                            mineralData[minNames[i]]["class"] = mineralData[minNames[i]]["class"].substring(0, mineralData[minNames[i]]["class"].indexOf("[[H-M symbol]]:")).trim();
+                            mineralData[minNames[i]]["HMSymbol"] = classData[1].trim();
+                        }
+                    } else if (mineralData[minNames[i]]["class"].includes("[[H-M symbol]]:")) {
+                        let classData = mineralData[minNames[i]]["class"].split("[[H-M symbol]]:");
+                        mineralData[minNames[i]]["class"] = mineralData[minNames[i]]["class"].substring(0, mineralData[minNames[i]]["class"].indexOf("[[H-M symbol]]:")).trim();
+                        mineralData[minNames[i]]["HMSymbol"] = classData[1].trim();
+                    }
                 }
             }
             if (mineralData[minNames[i]]["mohs"]) {
-                mineralData[minNames[i]]["mohs"] = mineralData[minNames[i]]["mohs"].replace(/frac\|\b(\d)\b\|1\|2/gm, function(match) {
-                    return `${match.substring(5, 6)}.5`;
-                });
-                mineralData[minNames[i]]["mohs"] = mineralData[minNames[i]]["mohs"].replace(/(&nbsp;|\s)*(-|&ndash;|â€“|\\u2013|to)(&nbsp;|\s)*/gm, '-');
+                
+                mineralData[minNames[i]]["mohs"] = mineralData[minNames[i]]["mohs"].replace(/<ref[^>|\/]*>.*?<\/ref>|<ref[^>]*\/>|\{\{|\}\}/gm, '');
+                mineralData[minNames[i]]["mohs"] = mineralData[minNames[i]]["mohs"].replace(/(&nbsp;|\s)*(-|–|&ndash;|â€“|\\u2013|to)(&nbsp;|\s)*/gm, '-');
+                
+                if (mineralData[minNames[i]]["mohs"].match(/frac\|(\d)\|1\|2/m) !== null) {
+                    mineralData[minNames[i]]["mohs"] = mineralData[minNames[i]]["mohs"].replace(/frac\|\d\|1\|2/gm, `${mineralData[minNames[i]]["mohs"].match(/frac\|(\d)\|1\|2/m)[1]}.5`);
+                }
+                else if (mineralData[minNames[i]]["mohs"].match(/(\d)frac\|1\|2/m) !== null) {
+                    mineralData[minNames[i]]["mohs"] = mineralData[minNames[i]]["mohs"].replace(/\dfrac\|1\|2/gm, `${mineralData[minNames[i]]["mohs"].match(/(\d)frac\|1\|2/m)[1]}.5`);
+                }
+
+                if (mineralData[minNames[i]]["mohs"].match(/\<\d\.?\d*/gm) !== null) {
+                    mineralData[minNames[i]]["mohsLow"] = mineralData[minNames[i]]["mohs"].match(/\<\d\.?\d*/gm)[0];
+                    mineralData[minNames[i]]["mohsHigh"] = mineralData[minNames[i]]["mohs"].match(/\<\d\.?\d*/gm)[0];
+                } else if (mineralData[minNames[i]]["mohs"].match(/\d\.?\d*/m) !== null) {
+                    let match = mineralData[minNames[i]]["mohs"].match(/(\d\.?\d*)/gm);
+                    if (match.length === 1) {
+                        mineralData[minNames[i]]["mohsLow"] = match[0];
+                        mineralData[minNames[i]]["mohsHigh"] = match[0];
+                    }
+                    else if (match.length === 2) {
+                        mineralData[minNames[i]]["mohsLow"] = String(Math.min(match[0], match[1]));
+                        mineralData[minNames[i]]["mohsHigh"] = String(Math.max(match[0], match[1]));
+                    }
+                    else if (match.length > 2) {
+                        mineralData[minNames[i]]["mohsLow"] = String(Math.min(match[0], match[1], match[2]));
+                        mineralData[minNames[i]]["mohsHigh"] = String(Math.max(match[0], match[1], match[2]));
+                    }      
+                }
+            }
+            if (mineralData[minNames[i]]["crystalSystem"]) {
+                mineralData[minNames[i]]["crystalSystem"] = mineralData[minNames[i]]["crystalSystem"].replace(/<br\s*\/>/gm, '');
+                if (mineralData[minNames[i]]["crystalSystem"].match(/\[\[.*\]\]/gm) !== null) {
+                    let match;
+                    if (mineralData[minNames[i]]["crystalSystem"].match(/\[\[.+\|(.+)\]\]\s*(.+)/m) !== null) {
+                        match = mineralData[minNames[i]]["crystalSystem"].match(/\[\[.+\|(.+)\]\]\s*(.+)/m);
+                    } else if (mineralData[minNames[i]]["crystalSystem"].match(/\[\[.+\|(.+)\]\]/m) !== null) {
+                        match = mineralData[minNames[i]]["crystalSystem"].match(/\[\[.+\|(.+)\]\]/m);
+                    } else if (mineralData[minNames[i]]["crystalSystem"].match(/\[\[(.+)\]\]\s*(.+)/m) !== null) {
+                        match = mineralData[minNames[i]]["crystalSystem"].match(/\[\[(.+)\]\]\s*(.+)/m);
+                    } else {
+                        match = mineralData[minNames[i]]["crystalSystem"].match(/\[\[(.*)\]\]/m);
+                    }
+                    if (match !== null && match[1]) {
+                        mineralData[minNames[i]]["crystalSystem"] = match[1].trim();
+                        if (!mineralData[minNames[i]]["class"] && typeof match[2] === 'string') {
+                            mineralData[minNames[i]]["class"] = match[2].trim();
+                        }
+                    }
+                }
+            }
+            if (mineralData[minNames[i]]["category"]) {
+                mineralData[minNames[i]]["category"] = mineralData[minNames[i]]["category"].replace(/\s*and\s*/gm, ', ');
+            }
+            if (mineralData[minNames[i]]["gravity"]) {
+                mineralData[minNames[i]]["gravity"] = mineralData[minNames[i]]["gravity"].replace(/\s*(\–|to|-)\s*/gm, '-');
+                mineralData[minNames[i]]["gravity"] = mineralData[minNames[i]]["gravity"].replace(/[a-zA-Z|;]+(?![^\(]*\))/gm, '');
+                if (mineralData[minNames[i]]["gravity"].match(/(\d+\.\d*\s*)\-(\d+\.\d*)/m) !== null) {
+                    let match = mineralData[minNames[i]]["gravity"].match(/(\d+\.\d*\s*)\-(\d+\.\d*)/m);
+                        mineralData[minNames[i]]["gravityLow"] = match[1];
+                        mineralData[minNames[i]]["gravityHigh"] = match[2];
+                } else if (mineralData[minNames[i]]["gravity"].match(/\d+\.\d*/gm) != null && mineralData[minNames[i]]["gravity"].match(/\+\/\-(\d*\.\d*)(?=[^\(]*\))/m) !== null) {
+                    let value = mineralData[minNames[i]]["gravity"].match(/(\d+\.\d*)/m)[1];
+                    let variance = mineralData[minNames[i]]["gravity"].match(/\+\/\-(\d*\.\d*)(?=[^\(]*\))/m)[1];
+                        mineralData[minNames[i]]["gravityLow"] = String(Math.round((parseFloat(value) + parseFloat(variance)) * 100) / 100);
+                        mineralData[minNames[i]]["gravityHigh"] = String(Math.round((parseFloat(value) - parseFloat(variance)) * 100) / 100);
+                } else if (mineralData[minNames[i]]["gravity"].match(/\d+\.\d*/gm) != null && mineralData[minNames[i]]["gravity"].match(/\+(\d*\.\d*)\s*,*\s*\-(\d*\.\d*)(?=[^\(]*\))/m) !== null) {
+                    let value = mineralData[minNames[i]]["gravity"].match(/(\d+\.\d*)/m)[1];
+                    let variance = mineralData[minNames[i]]["gravity"].match(/\+(\d*\.\d*)\s*,*\s*\-(\d*\.\d*)(?=[^\(]*\))/m);
+                        mineralData[minNames[i]]["gravityLow"] = String(Math.round((parseFloat(value) + parseFloat(variance[1])) * 100) / 100);
+                        mineralData[minNames[i]]["gravityHigh"] = String(Math.round((parseFloat(value) - parseFloat(variance[2])) * 100) / 100);
+                } else if (mineralData[minNames[i]]["gravity"].match(/(\d+\.\d*).*?(\d+\.\d*)/m) !== null) {
+                    let match = mineralData[minNames[i]]["gravity"].match(/(\d+\.\d*).*?(\d+\.\d*)/m);
+                        mineralData[minNames[i]]["gravityLow"] = match[1];
+                        mineralData[minNames[i]]["gravityHigh"] = match[2];
+                } else if (mineralData[minNames[i]]["gravity"].match(/\d+\.\d*/gm) !== null) {
+                        mineralData[minNames[i]]["gravityLow"] = mineralData[minNames[i]]["gravity"].match(/\d+\.\d*/m)[0];
+                        mineralData[minNames[i]]["gravityHigh"] = mineralData[minNames[i]]["gravity"].match(/\d+\.\d*/m)[0];
+                } else {
+                        mineralData[minNames[i]]["gravityLow"] = mineralData[minNames[i]]["gravity"];
+                        mineralData[minNames[i]]["gravityHigh"] = mineralData[minNames[i]]["gravity"];
+                }                
             }
 
             for (let j = 0; j < mineralAttributes.length; j++) {
                 if (mineralData[minNames[i]][mineralAttributes[j]]) {
-                    stream.write(mineralData[minNames[i]][mineralAttributes[j]].replace(/~|<br\s*?\/>|\{\{|\}\}/gm, ''));
+                    stream.write(mineralData[minNames[i]][mineralAttributes[j]].replace(/~|'''|<ref[^>|\/]*>.*?<\/ref>|<ref[^>]*\/>|<br\s*?\/>|\r?\n|\r|\{\{|\}\}|\[\[|\]\]/gm, ''));
                 } 
                 if (j < mineralAttributes.length - 1) {
                     stream.write('~');
@@ -179,7 +272,7 @@ async function writeMineralProperties(mineralData) {
             }
         }
     });
-    // console.log(`Completed writing mineral properties to csv`);
+    console.log(`Completed writing mineral properties to csv`);
 }
 
 function catalogUniqueAttributes(mineralData) {
@@ -193,21 +286,21 @@ function catalogUniqueAttributes(mineralData) {
             }
         });
     }
-    // console.log(`Completed cataloging unique mineral attributes`);
+    console.log(`Completed cataloging unique mineral attributes`);
     return mineralAttributes;
 }
 
 async function writeAttributes(attributes) {
     let stream = fs.createWriteStream('mineralsAttributes.txt');
     await stream.once('open', function(fd) {
-        for (let i = 0; i < attributes.length; i++) {
+       for (let i = 0; i < attributes.length; i++) {
             stream.write(attributes[i]);
             if (i < attributes.length - 1) {
                 stream.write('\n');
             }
         }
     });
-    // console.log(`Completed writing mineral attributes to txt`);
+    console.log(`Completed writing mineral attributes to txt`);
 }
 
 async function writeFailedMinerals(failedMinerals) {
@@ -220,7 +313,7 @@ async function writeFailedMinerals(failedMinerals) {
             }
         }
     });
-    // console.log(`Completed writing failed minerals to txt`);
+    console.log(`Completed writing failed minerals to txt`);
 }
 
 async function processMinerals() {
@@ -247,3 +340,5 @@ async function processMinerals() {
 }
 
 processMinerals();
+
+
